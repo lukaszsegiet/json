@@ -1,8 +1,42 @@
 .PHONY: pretty clean ChangeLog.md
 
+SRCS = include/nlohmann/json.hpp \
+       include/nlohmann/json_fwd.hpp \
+       include/nlohmann/adl_serializer.hpp \
+       include/nlohmann/detail/conversions/from_json.hpp \
+       include/nlohmann/detail/conversions/to_chars.hpp \
+       include/nlohmann/detail/conversions/to_json.hpp \
+       include/nlohmann/detail/exceptions.hpp \
+       include/nlohmann/detail/input/binary_reader.hpp \
+       include/nlohmann/detail/input/input_adapters.hpp \
+       include/nlohmann/detail/input/lexer.hpp \
+       include/nlohmann/detail/input/parser.hpp \
+       include/nlohmann/detail/iterators/internal_iterator.hpp \
+       include/nlohmann/detail/iterators/iter_impl.hpp \
+       include/nlohmann/detail/iterators/iteration_proxy.hpp \
+       include/nlohmann/detail/iterators/json_reverse_iterator.hpp \
+       include/nlohmann/detail/iterators/primitive_iterator.hpp \
+       include/nlohmann/detail/json_pointer.hpp \
+       include/nlohmann/detail/json_ref.hpp \
+       include/nlohmann/detail/macro_scope.hpp \
+       include/nlohmann/detail/macro_unscope.hpp \
+       include/nlohmann/detail/meta.hpp \
+       include/nlohmann/detail/output/binary_writer.hpp \
+       include/nlohmann/detail/output/output_adapters.hpp \
+       include/nlohmann/detail/output/serializer.hpp \
+       include/nlohmann/detail/value_t.hpp
+
+UNAME = $(shell uname)
+CXX=clang++
+
+AMALGAMATED_FILE=single_include/nlohmann/json.hpp
+
+# main target
 all:
+	@echo "amalgamate - amalgamate file single_include/nlohmann/json.hpp from the include/nlohmann sources"
 	@echo "ChangeLog.md - generate ChangeLog file"
 	@echo "check - compile and execute test suite"
+	@echo "check-amalgamation - check whether sources have been amalgamated"
 	@echo "check-fast - compile and execute test suite (skip long-running tests)"
 	@echo "clean - remove built files"
 	@echo "coverage - create coverage information with lcov"
@@ -11,11 +45,12 @@ all:
 	@echo "fuzz_testing - prepare fuzz testing of the JSON parser"
 	@echo "fuzz_testing_cbor - prepare fuzz testing of the CBOR parser"
 	@echo "fuzz_testing_msgpack - prepare fuzz testing of the MessagePack parser"
+	@echo "fuzz_testing_ubjson - prepare fuzz testing of the UBJSON parser"
 	@echo "json_unit - create single-file test executable"
 	@echo "pedantic_clang - run Clang with maximal warning flags"
 	@echo "pedantic_gcc - run GCC with maximal warning flags"
 	@echo "pretty - beautify code with Artistic Style"
-
+	@echo "run_benchmarks - build and run benchmarks"
 
 ##########################################################################
 # unit tests
@@ -36,10 +71,9 @@ check-fast:
 clean:
 	rm -fr json_unit json_benchmarks fuzz fuzz-testing *.dSYM test/*.dSYM
 	rm -fr benchmarks/files/numbers/*.json
-	rm -fr build_coverage
+	rm -fr build_coverage build_benchmarks
 	$(MAKE) clean -Cdoc
 	$(MAKE) clean -Ctest
-	$(MAKE) clean -Cbenchmarks
 
 
 ##########################################################################
@@ -48,9 +82,9 @@ clean:
 
 coverage:
 	mkdir build_coverage
-	cd build_coverage ; CXX=g++-5 cmake .. -GNinja -DJSON_Coverage=ON
+	cd build_coverage ; CXX=g++-5 cmake .. -GNinja -DJSON_Coverage=ON -DJSON_MultipleHeaders=ON
 	cd build_coverage ; ninja
-	cd build_coverage ; ctest
+	cd build_coverage ; ctest -j10
 	cd build_coverage ; ninja lcov_html
 	open build_coverage/test/html/index.html
 
@@ -74,7 +108,7 @@ doctest:
 # -Wno-keyword-macro: unit-tests use "#define private public"
 # -Wno-deprecated-declarations: the library deprecated some functions
 # -Wno-weak-vtables: exception class is defined inline, but has virtual method
-# -Wno-range-loop-analysis: iterator_wrapper tests "for(const auto i...)"
+# -Wno-range-loop-analysis: items tests "for(const auto i...)"
 # -Wno-float-equal: not all comparisons in the tests can be replaced by Approx
 # -Wno-switch-enum -Wno-covered-switch-default: pedantic/contradicting warnings about switches
 # -Wno-padded: padding is nothing to warn about
@@ -156,6 +190,16 @@ pedantic_gcc:
 		-Wvariadic-macros"
 
 ##########################################################################
+# benchmarks
+##########################################################################
+
+run_benchmarks:
+	mkdir build_benchmarks
+	cd build_benchmarks ; cmake ../benchmarks
+	cd build_benchmarks ; make
+	cd build_benchmarks ; ./json_benchmarks
+
+##########################################################################
 # fuzzing
 ##########################################################################
 
@@ -184,6 +228,14 @@ fuzz_testing_msgpack:
 	find test/data -size -5k -name *.msgpack | xargs -I{} cp "{}" fuzz-testing/testcases
 	@echo "Execute: afl-fuzz -i fuzz-testing/testcases -o fuzz-testing/out fuzz-testing/fuzzer"
 
+fuzz_testing_ubjson:
+	rm -fr fuzz-testing
+	mkdir -p fuzz-testing fuzz-testing/testcases fuzz-testing/out
+	$(MAKE) parse_ubjson_fuzzer -C test CXX=afl-clang++
+	mv test/parse_ubjson_fuzzer fuzz-testing/fuzzer
+	find test/data -size -5k -name *.ubjson | xargs -I{} cp "{}" fuzz-testing/testcases
+	@echo "Execute: afl-fuzz -i fuzz-testing/testcases -o fuzz-testing/out fuzz-testing/fuzzer"
+
 fuzzing-start:
 	afl-fuzz -S fuzzer1 -i fuzz-testing/testcases -o fuzz-testing/out fuzz-testing/fuzzer > /dev/null &
 	afl-fuzz -S fuzzer2 -i fuzz-testing/testcases -o fuzz-testing/out fuzz-testing/fuzzer > /dev/null &
@@ -204,8 +256,14 @@ fuzzing-stop:
 
 # call cppcheck on the main header file
 cppcheck:
-	cppcheck --enable=warning --inconclusive --force --std=c++11 src/json.hpp --error-exitcode=1
+	cppcheck --enable=warning --inconclusive --force --std=c++11 $(AMALGAMATED_FILE) --error-exitcode=1
 
+# compile and check with Clang Static Analyzer
+clang_analyze:
+	rm -fr clang_analyze_build
+	mkdir clang_analyze_build
+	cd clang_analyze_build ; CCC_CXX=/Users/niels/Documents/projects/llvm-clang/local/bin/clang++ /Users/niels/Documents/projects/llvm-clang/local/bin/scan-build cmake ..
+	/Users/niels/Documents/projects/llvm-clang/local/bin/scan-build -enable-checker alpha.core.DynamicTypeChecker,alpha.core.PointerArithm,alpha.core.PointerSub,alpha.cplusplus.DeleteWithNonVirtualDtor,alpha.cplusplus.IteratorRange,alpha.cplusplus.MisusedMovedObject,alpha.security.ArrayBoundV2,alpha.core.Conversion --use-c++=/Users/niels/Documents/projects/llvm-clang/local/bin/clang++ --view -analyze-headers -o clang_analyze_build/report.html make -j10 -C clang_analyze_build
 
 ##########################################################################
 # maintainer targets
@@ -218,9 +276,31 @@ pretty:
 	   --indent-col1-comments --pad-oper --pad-header --align-pointer=type \
 	   --align-reference=type --add-brackets --convert-tabs --close-templates \
 	   --lineend=linux --preserve-date --suffix=none --formatted \
-	   src/json.hpp test/src/*.cpp \
+	   $(SRCS) $(AMALGAMATED_FILE) test/src/*.cpp \
 	   benchmarks/src/benchmarks.cpp doc/examples/*.cpp
 
+# create single header file
+amalgamate: $(AMALGAMATED_FILE)
+
+$(AMALGAMATED_FILE): $(SRCS)
+	third_party/amalgamate/amalgamate.py -c third_party/amalgamate/config.json -s . --verbose=yes
+	$(MAKE) pretty
+
+# check if single_include/nlohmann/json.hpp has been amalgamated from the nlohmann sources
+check-amalgamation:
+	@mv $(AMALGAMATED_FILE) $(AMALGAMATED_FILE)~
+	@$(MAKE) amalgamate
+	@diff $(AMALGAMATED_FILE) $(AMALGAMATED_FILE)~ || (echo "===================================================================\n  Amalgamation required! Please read the contribution guidelines\n  in file .github/CONTRIBUTING.md.\n===================================================================" ; mv $(AMALGAMATED_FILE)~ $(AMALGAMATED_FILE) ; false)
+	@mv $(AMALGAMATED_FILE)~ $(AMALGAMATED_FILE)
+
+# check if every header in nlohmann includes sufficient headers to be compiled
+# individually
+check-single-includes:
+	for x in $(SRCS); do \
+	  echo "#include <$$x>\nint main() {}\n" | sed 's|include/||' > single_include_test.cpp; \
+	  $(CXX) $(CXXFLAGS) -Iinclude -std=c++11 single_include_test.cpp -o single_include_test; \
+	  rm single_include_test.cpp single_include_test; \
+	done
 
 ##########################################################################
 # changelog
@@ -232,3 +312,19 @@ ChangeLog.md:
 	github_changelog_generator -o ChangeLog.md --simple-list --release-url https://github.com/nlohmann/json/releases/tag/%s --future-release $(NEXT_VERSION)
 	gsed -i 's|https://github.com/nlohmann/json/releases/tag/HEAD|https://github.com/nlohmann/json/tree/HEAD|' ChangeLog.md
 	gsed -i '2i All notable changes to this project will be documented in this file. This project adheres to [Semantic Versioning](http://semver.org/).' ChangeLog.md
+
+
+##########################################################################
+# release
+##########################################################################
+
+release:
+	mkdir release_files
+	zip -9 -r include.zip include/*
+	gpg --armor --detach-sig include.zip
+	mv include.zip include.zip.asc release_files
+	gpg --armor --detach-sig single_include/nlohmann/json.hpp
+	cp single_include/nlohmann/json.hpp release_files
+	mv single_include/nlohmann/json.hpp.asc release_files
+	cd release_files ; shasum -a 256 json.hpp > hashes.txt
+	cd release_files ; shasum -a 256 include.zip >> hashes.txt

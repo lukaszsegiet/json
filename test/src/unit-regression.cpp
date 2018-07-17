@@ -1,11 +1,11 @@
 /*
     __ _____ _____ _____
  __|  |   __|     |   | |  JSON for Modern C++ (test suite)
-|  |  |__   |  |  | | | |  version 3.0.1
+|  |  |__   |  |  | | | |  version 3.1.2
 |_____|_____|_____|_|___|  https://github.com/nlohmann/json
 
 Licensed under the MIT License <http://opensource.org/licenses/MIT>.
-Copyright (c) 2013-2017 Niels Lohmann <http://nlohmann.me>.
+Copyright (c) 2013-2018 Niels Lohmann <http://nlohmann.me>.
 
 Permission is hereby  granted, free of charge, to any  person obtaining a copy
 of this software and associated  documentation files (the "Software"), to deal
@@ -29,12 +29,74 @@ SOFTWARE.
 #include "catch.hpp"
 
 #define private public
-#include "json.hpp"
+#include <nlohmann/json.hpp>
 using nlohmann::json;
+
+#include "fifo_map.hpp"
 
 #include <fstream>
 #include <list>
 #include <cstdio>
+
+/////////////////////////////////////////////////////////////////////
+// for #972
+/////////////////////////////////////////////////////////////////////
+
+template<class K, class V, class dummy_compare, class A>
+using my_workaround_fifo_map = nlohmann::fifo_map<K, V, nlohmann::fifo_map_compare<K>, A>;
+using my_json = nlohmann::basic_json<my_workaround_fifo_map>;
+
+/////////////////////////////////////////////////////////////////////
+// for #977
+/////////////////////////////////////////////////////////////////////
+
+namespace ns
+{
+struct foo
+{
+    int x;
+};
+
+template <typename, typename SFINAE = void>
+struct foo_serializer;
+
+template<typename T>
+struct foo_serializer<T, typename std::enable_if<std::is_same<foo, T>::value>::type>
+{
+    template <typename BasicJsonType>
+    static void to_json(BasicJsonType& j, const T& value)
+    {
+        j = BasicJsonType{{"x", value.x}};
+    }
+    template <typename BasicJsonType>
+    static void from_json(const BasicJsonType& j, T& value)     // !!!
+    {
+        nlohmann::from_json(j.at("x"), value.x);
+    }
+};
+
+template<typename T>
+struct foo_serializer < T, typename std::enable_if < !std::is_same<foo, T>::value >::type >
+{
+    template <typename BasicJsonType>
+    static void to_json(BasicJsonType& j, const T& value) noexcept
+    {
+        ::nlohmann::to_json(j, value);
+    }
+    template <typename BasicJsonType>
+    static void from_json(const BasicJsonType& j, T& value)   //!!!
+    {
+        ::nlohmann::from_json(j, value);
+    }
+};
+}
+
+using foo_json = nlohmann::basic_json<std::map, std::vector, std::string, bool, std::int64_t,
+      std::uint64_t, double, std::allocator, ns::foo_serializer>;
+
+/////////////////////////////////////////////////////////////////////
+// for #805
+/////////////////////////////////////////////////////////////////////
 
 namespace
 {
@@ -593,6 +655,64 @@ TEST_CASE("regression tests")
                           "[json.exception.out_of_range.406] number overflow parsing '22e2222'");
     }
 
+    SECTION("issue #360 - Loss of precision when serializing <double>")
+    {
+        auto check_roundtrip = [](double number)
+        {
+            CAPTURE(number);
+
+            json j = number;
+            CHECK(j.is_number_float());
+
+            std::stringstream ss;
+            ss << j;
+
+            CHECK_NOTHROW(ss >> j);
+            CHECK(j.is_number_float());
+            CHECK(j.get<json::number_float_t>() == number);
+        };
+
+        check_roundtrip(100000000000.1236);
+        check_roundtrip(std::numeric_limits<json::number_float_t>::max());
+
+        // Some more numbers which fail to roundtrip when serialized with digits10 significand digits (instead of max_digits10)
+        check_roundtrip(1.541888611948064e-17);
+        check_roundtrip(5.418771028591015e-16);
+        check_roundtrip(9.398685592608595e-15);
+        check_roundtrip(8.826843952762347e-14);
+        check_roundtrip(8.143291313475335e-13);
+        check_roundtrip(4.851328172762508e-12);
+        check_roundtrip(6.677850998084358e-11);
+        check_roundtrip(3.995398518174525e-10);
+        check_roundtrip(1.960452605645124e-9);
+        check_roundtrip(3.551812586302883e-8);
+        check_roundtrip(2.947988411689261e-7);
+        check_roundtrip(8.210166748056192e-6);
+        check_roundtrip(6.104889704266753e-5);
+        check_roundtrip(0.0008629954631330876);
+        check_roundtrip(0.004936993881051611);
+        check_roundtrip(0.08309725102608073);
+        check_roundtrip(0.5210494268499783);
+        check_roundtrip(6.382927930939767);
+        check_roundtrip(59.94947245358671);
+        check_roundtrip(361.0838651266122);
+        check_roundtrip(4678.354596181877);
+        check_roundtrip(61412.17658956043);
+        check_roundtrip(725696.0799057782);
+        check_roundtrip(2811732.583399828);
+        check_roundtrip(30178351.07533605);
+        check_roundtrip(689684880.3235844);
+        check_roundtrip(5714887673.555147);
+        check_roundtrip(84652038821.18808);
+        check_roundtrip(156510583431.7721);
+        check_roundtrip(5938450569021.732);
+        check_roundtrip(83623297654460.33);
+        check_roundtrip(701466573254773.6);
+        check_roundtrip(1369013370304513);
+        check_roundtrip(96963648023094720);
+        check_roundtrip(3.478237409280108e+17);
+    }
+
     SECTION("issue #366 - json::parse on failed stream gets stuck")
     {
         std::ifstream f("file_not_found.json");
@@ -785,7 +905,7 @@ TEST_CASE("regression tests")
     {
         json j = json::parse("166020696663385964490");
         CHECK(j.is_number_float());
-        CHECK(j.dump() == "1.66020696663386e+20");
+        CHECK(j.get<json::number_float_t>() == 166020696663385964490.0);
     }
 
     SECTION("issue #405 - Heap-buffer-overflow (OSS-Fuzz issue 342)")
@@ -1311,7 +1431,7 @@ TEST_CASE("regression tests")
         uint8_t key1[] = { 103, 92, 117, 48, 48, 48, 55, 92, 114, 215, 126, 214, 95, 92, 34, 174, 40, 71, 38, 174, 40, 71, 38, 223, 134, 247, 127 };
         std::string key1_str(key1, key1 + sizeof(key1) / sizeof(key1[0]));
         json j = key1_str;
-        CHECK_THROWS_AS(j.dump(), json::type_error);
+        CHECK_THROWS_AS(j.dump(), json::type_error&);
         CHECK_THROWS_WITH(j.dump(), "[json.exception.type_error.316] invalid UTF-8 byte at index 10: 0x7E");
     }
 
@@ -1336,7 +1456,7 @@ TEST_CASE("regression tests")
 
         CHECK_THROWS_AS(model.patch(R"([{"op": "move",
                          "from": "/one/two/three",
-                         "path": "/a/b/c"}])"_json), json::out_of_range);
+                         "path": "/a/b/c"}])"_json), json::out_of_range&);
         CHECK_THROWS_WITH(model.patch(R"([{"op": "move",
                          "from": "/one/two/three",
                          "path": "/a/b/c"}])"_json),
@@ -1344,10 +1464,137 @@ TEST_CASE("regression tests")
 
         CHECK_THROWS_AS(model.patch(R"([{"op": "copy",
                                  "from": "/one/two/three",
-                                 "path": "/a/b/c"}])"_json), json::out_of_range);
+                                 "path": "/a/b/c"}])"_json), json::out_of_range&);
         CHECK_THROWS_WITH(model.patch(R"([{"op": "copy",
                                  "from": "/one/two/three",
                                  "path": "/a/b/c"}])"_json),
                           "[json.exception.out_of_range.403] key 'a' not found");
+    }
+
+    SECTION("issue #961 - incorrect parsing of indefinite length CBOR strings")
+    {
+        std::vector<uint8_t> v_cbor =
+        {
+            0x7F,
+            0x64,
+            'a', 'b', 'c', 'd',
+            0x63,
+            '1', '2', '3',
+            0xFF
+        };
+        json j = json::from_cbor(v_cbor);
+        CHECK(j == "abcd123");
+    }
+
+    SECTION("issue #962 - Timeout (OSS-Fuzz 6034)")
+    {
+        std::vector<uint8_t> v_ubjson = {'[', '$', 'Z', '#', 'L', 0x78, 0x28, 0x00, 0x68, 0x28, 0x69, 0x69, 0x17};
+        CHECK_THROWS_AS(json::from_ubjson(v_ubjson), json::out_of_range&);
+        //CHECK_THROWS_WITH(json::from_ubjson(v_ubjson),
+        //                  "[json.exception.out_of_range.408] excessive array size: 8658170730974374167");
+
+        v_ubjson[0] = '{';
+        CHECK_THROWS_AS(json::from_ubjson(v_ubjson), json::out_of_range&);
+        //CHECK_THROWS_WITH(json::from_ubjson(v_ubjson),
+        //                  "[json.exception.out_of_range.408] excessive object size: 8658170730974374167");
+    }
+
+    SECTION("issue #972 - Segmentation fault on G++ when trying to assign json string literal to custom json type")
+    {
+        my_json foo = R"([1, 2, 3])"_json;
+    }
+
+    SECTION("issue #977 - Assigning between different json types")
+    {
+        foo_json lj = ns::foo{3};
+        ns::foo ff = lj;
+        CHECK(lj.is_object());
+        CHECK(lj.size() == 1);
+        CHECK(lj["x"] == 3);
+        CHECK(ff.x == 3);
+        nlohmann::json nj = lj;                // This line works as expected
+    }
+
+    SECTION("issue #1001 - Fix memory leak during parser callback")
+    {
+        auto geojsonExample = R"(
+          { "type": "FeatureCollection",
+            "features": [
+              { "type": "Feature",
+                "geometry": {"type": "Point", "coordinates": [102.0, 0.5]},
+                "properties": {"prop0": "value0"}
+                },
+              { "type": "Feature",
+                "geometry": {
+                  "type": "LineString",
+                  "coordinates": [
+                    [102.0, 0.0], [103.0, 1.0], [104.0, 0.0], [105.0, 1.0]
+                    ]
+                  },
+                "properties": {
+                  "prop0": "value0",
+                  "prop1": 0.0
+                  }
+                },
+              { "type": "Feature",
+                 "geometry": {
+                   "type": "Polygon",
+                   "coordinates": [
+                     [ [100.0, 0.0], [101.0, 0.0], [101.0, 1.0],
+                       [100.0, 1.0], [100.0, 0.0] ]
+                     ]
+                 },
+                 "properties": {
+                   "prop0": "value0",
+                   "prop1": {"this": "that"}
+                   }
+                 }
+               ]
+             })";
+
+        json::parser_callback_t cb = [&](int, json::parse_event_t event, json & parsed)
+        {
+            // skip uninteresting events
+            if (event == json::parse_event_t::value and !parsed.is_primitive())
+            {
+                return false;
+            }
+
+            switch (event)
+            {
+                case json::parse_event_t::key:
+                {
+                    return true;
+                }
+                case json::parse_event_t::value:
+                {
+                    return false;
+                }
+                case json::parse_event_t::object_start:
+                {
+                    return true;
+                }
+                case json::parse_event_t::object_end:
+                {
+                    return false;
+                }
+                case json::parse_event_t::array_start:
+                {
+                    return true;
+                }
+                case json::parse_event_t::array_end:
+                {
+                    return false;
+                }
+
+                default:
+                {
+                    return true;
+                }
+            }
+        };
+
+        auto j = json::parse(geojsonExample, cb, true);
+        CHECK(j == json());
     }
 }

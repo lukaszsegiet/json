@@ -1,11 +1,11 @@
 /*
     __ _____ _____ _____
  __|  |   __|     |   | |  JSON for Modern C++ (test suite)
-|  |  |__   |  |  | | | |  version 3.0.1
+|  |  |__   |  |  | | | |  version 3.1.2
 |_____|_____|_____|_|___|  https://github.com/nlohmann/json
 
 Licensed under the MIT License <http://opensource.org/licenses/MIT>.
-Copyright (c) 2013-2017 Niels Lohmann <http://nlohmann.me>.
+Copyright (c) 2013-2018 Niels Lohmann <http://nlohmann.me>.
 
 Permission is hereby  granted, free of charge, to any  person obtaining a copy
 of this software and associated  documentation files (the "Software"), to deal
@@ -28,7 +28,7 @@ SOFTWARE.
 
 #include "catch.hpp"
 
-#include "json.hpp"
+#include <nlohmann/json.hpp>
 using nlohmann::json;
 
 #include <fstream>
@@ -1381,7 +1381,7 @@ TEST_CASE("single CBOR roundtrip")
         std::ifstream f_json(filename);
         json j1 = json::parse(f_json);
 
-        // parse MessagePack file
+        // parse CBOR file
         std::ifstream f_cbor(filename + ".cbor", std::ios::binary);
         std::vector<uint8_t> packed((std::istreambuf_iterator<char>(f_cbor)),
                                     std::istreambuf_iterator<char>());
@@ -1703,7 +1703,7 @@ TEST_CASE("CBOR roundtrips", "[hide]")
     }
 }
 
-TEST_CASE("all first bytes", "[!throws]")
+TEST_CASE("all CBOR first bytes", "[!throws]")
 {
     // these bytes will fail immediately with exception parse_error.112
     std::set<uint8_t> unsupported =
@@ -1921,7 +1921,7 @@ TEST_CASE("examples from RFC 7049 Appendix A")
         CHECK(json::parse("\"\\ud800\\udd51\"") == json::from_cbor(std::vector<uint8_t>({0x64, 0xf0, 0x90, 0x85, 0x91})));
 
         // indefinite length strings
-        CHECK(json::parse("\"streaming\"") == json::from_cbor(std::vector<uint8_t>({0x7f, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0xff})));
+        CHECK(json::parse("\"streaming\"") == json::from_cbor(std::vector<uint8_t>({0x7f, 0x65, 0x73, 0x74, 0x72, 0x65, 0x61, 0x64, 0x6d, 0x69, 0x6e, 0x67, 0xff})));
     }
 
     SECTION("arrays")

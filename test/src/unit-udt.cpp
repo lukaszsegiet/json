@@ -1,11 +1,11 @@
 /*
     __ _____ _____ _____
  __|  |   __|     |   | |  JSON for Modern C++ (test suite)
-|  |  |__   |  |  | | | |  version 3.0.1
+|  |  |__   |  |  | | | |  version 3.1.2
 |_____|_____|_____|_|___|  https://github.com/nlohmann/json
 
 Licensed under the MIT License <http://opensource.org/licenses/MIT>.
-Copyright (c) 2013-2016 Niels Lohmann <http://nlohmann.me>.
+Copyright (c) 2013-2018 Niels Lohmann <http://nlohmann.me>.
 
 Permission is hereby  granted, free of charge, to any  person obtaining a copy
 of this software and associated  documentation files (the "Software"), to deal
@@ -28,7 +28,7 @@ SOFTWARE.
 
 #include "catch.hpp"
 
-#include "json.hpp"
+#include <nlohmann/json.hpp>
 
 using nlohmann::json;
 
@@ -691,4 +691,122 @@ TEST_CASE("custom serializer that does adl by default", "[udt]")
 
     CHECK(me == j.get<udt::person>());
     CHECK(me == cj.get<udt::person>());
+}
+
+TEST_CASE("different basic_json types conversions")
+{
+    using json = nlohmann::json;
+
+    SECTION("null")
+    {
+        json j;
+        custom_json cj = j;
+        CHECK(cj == nullptr);
+    }
+
+    SECTION("boolean")
+    {
+        json j = true;
+        custom_json cj = j;
+        CHECK(cj == true);
+    }
+
+    SECTION("discarded")
+    {
+        json j(json::value_t::discarded);
+        custom_json cj;
+        CHECK_NOTHROW(cj = j);
+        CHECK(cj.type() == custom_json::value_t::discarded);
+    }
+
+    SECTION("array")
+    {
+        json j = {1, 2, 3};
+        custom_json cj = j;
+        CHECK((cj == std::vector<int> {1, 2, 3}));
+    }
+
+    SECTION("integer")
+    {
+        json j = 42;
+        custom_json cj = j;
+        CHECK(cj == 42);
+    }
+
+    SECTION("float")
+    {
+        json j = 42.0;
+        custom_json cj = j;
+        CHECK(cj == 42.0);
+    }
+
+    SECTION("unsigned")
+    {
+        json j = 42u;
+        custom_json cj = j;
+        CHECK(cj == 42u);
+    }
+
+    SECTION("string")
+    {
+        json j = "forty-two";
+        custom_json cj = j;
+        CHECK(cj == "forty-two");
+    }
+
+    SECTION("object")
+    {
+        json j = {{"forty", "two"}};
+        custom_json cj = j;
+        auto m = j.get<std::map<std::string, std::string>>();
+        CHECK(cj == m);
+    }
+
+    SECTION("get<custom_json>")
+    {
+        json j = 42;
+        custom_json cj = j.get<custom_json>();
+        CHECK(cj == 42);
+    }
+}
+
+namespace
+{
+struct incomplete;
+
+// std::is_constructible is broken on macOS' libc++
+// use the cppreference implementation
+
+template <typename T, typename = void>
+struct is_constructible_patched : std::false_type {};
+
+template <typename T>
+struct is_constructible_patched<T, decltype(void(json(std::declval<T>())))> : std::true_type {};
+}
+
+TEST_CASE("an incomplete type does not trigger a compiler error in non-evaluated context", "[udt]")
+{
+    static_assert(not is_constructible_patched<json, incomplete>::value, "");
+}
+
+namespace
+{
+class Evil
+{
+  public:
+    Evil() = default;
+    template <typename T>
+    Evil(T) {}
+};
+
+void from_json(const json&, Evil&) {}
+}
+
+TEST_CASE("Issue #924")
+{
+    // Prevent get<std::vector<Evil>>() to throw
+    auto j = json::array();
+
+    CHECK_NOTHROW(j.get<Evil>());
+    CHECK_NOTHROW(j.get<std::vector<Evil>>());
 }
