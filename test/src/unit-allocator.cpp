@@ -1,11 +1,12 @@
 /*
     __ _____ _____ _____
  __|  |   __|     |   | |  JSON for Modern C++ (test suite)
-|  |  |__   |  |  | | | |  version 3.0.1
+|  |  |__   |  |  | | | |  version 3.3.0
 |_____|_____|_____|_|___|  https://github.com/nlohmann/json
 
 Licensed under the MIT License <http://opensource.org/licenses/MIT>.
-Copyright (c) 2013-2017 Niels Lohmann <http://nlohmann.me>.
+SPDX-License-Identifier: MIT
+Copyright (c) 2013-2018 Niels Lohmann <http://nlohmann.me>.
 
 Permission is hereby  granted, free of charge, to any  person obtaining a copy
 of this software and associated  documentation files (the "Software"), to deal
@@ -29,7 +30,7 @@ SOFTWARE.
 #include "catch.hpp"
 
 #define private public
-#include "json.hpp"
+#include <nlohmann/json.hpp>
 using nlohmann::json;
 
 // special test case to check if memory is leaked if constructor throws
@@ -175,29 +176,6 @@ TEST_CASE("controlled bad_alloc")
             CHECK_THROWS_AS(my_json::json_value(v), std::bad_alloc&);
             next_construct_fails = false;
         }
-
-        /*
-                SECTION("json_value(const object_t&)")
-                {
-                    next_construct_fails = false;
-                    my_json::object_t v {{"foo", "bar"}};
-                    CHECK_NOTHROW(my_json::json_value j(v));
-                    next_construct_fails = true;
-                    CHECK_THROWS_AS(my_json::json_value j(v), std::bad_alloc&);
-                    next_construct_fails = false;
-                }
-        */
-        /*
-                SECTION("json_value(const array_t&)")
-                {
-                    next_construct_fails = false;
-                    my_json::array_t v = {"foo", "bar", "baz"};
-                    CHECK_NOTHROW(my_json::json_value j(v));
-                    next_construct_fails = true;
-                    CHECK_THROWS_AS(my_json::json_value j(v), std::bad_alloc&);
-                    next_construct_fails = false;
-                }
-        */
     }
 
     SECTION("class basic_json")

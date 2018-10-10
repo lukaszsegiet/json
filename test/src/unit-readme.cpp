@@ -1,11 +1,12 @@
 /*
     __ _____ _____ _____
  __|  |   __|     |   | |  JSON for Modern C++ (test suite)
-|  |  |__   |  |  | | | |  version 3.0.1
+|  |  |__   |  |  | | | |  version 3.3.0
 |_____|_____|_____|_|___|  https://github.com/nlohmann/json
 
 Licensed under the MIT License <http://opensource.org/licenses/MIT>.
-Copyright (c) 2013-2017 Niels Lohmann <http://nlohmann.me>.
+SPDX-License-Identifier: MIT
+Copyright (c) 2013-2018 Niels Lohmann <http://nlohmann.me>.
 
 Permission is hereby  granted, free of charge, to any  person obtaining a copy
 of this software and associated  documentation files (the "Software"), to deal
@@ -28,7 +29,7 @@ SOFTWARE.
 
 #include "catch.hpp"
 
-#include "json.hpp"
+#include <nlohmann/json.hpp>
 using nlohmann::json;
 
 #include <deque>
@@ -152,6 +153,10 @@ TEST_CASE("README", "[hide]")
             j.push_back(1);
             j.push_back(true);
 
+            // comparison
+            bool x = (j == "[\"foo\", 1, true]"_json);  // true
+            CHECK(x == true);
+
             // iterate the array
             for (json::iterator it = j.begin(); it != j.end(); ++it)
             {
@@ -168,15 +173,13 @@ TEST_CASE("README", "[hide]")
             const std::string tmp = j[0];
             j[1] = 42;
             bool foo = j.at(2);
+            CHECK(foo == true);
 
             // other stuff
             j.size();     // 3 entries
             j.empty();    // false
             j.type();     // json::value_t::array
             j.clear();    // the array is empty again
-
-            // comparison
-            bool x = (j == "[\"foo\", 1, true]"_json);  // true
 
             // create an object
             json o;
@@ -257,17 +260,21 @@ TEST_CASE("README", "[hide]")
             bool b1 = true;
             json jb = b1;
             bool b2 = jb;
+            CHECK(b2 == true);
 
             // numbers
             int i = 42;
             json jn = i;
             double f = jn;
+            CHECK(f == 42);
 
             // etc.
 
             std::string vs = js.get<std::string>();
             bool vb = jb.get<bool>();
+            CHECK(vb == true);
             int vi = jn.get<int>();
+            CHECK(vi == 42);
 
             // etc.
         }
