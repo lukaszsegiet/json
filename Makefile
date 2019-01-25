@@ -36,6 +36,9 @@ CXX=clang++
 
 AMALGAMATED_FILE=single_include/nlohmann/json.hpp
 
+# directory to recent compiler binaries
+COMPILER_DIR=/Users/niels/Documents/projects/compilers/local/bin
+
 # main target
 all:
 	@echo "amalgamate - amalgamate file single_include/nlohmann/json.hpp from the include/nlohmann sources"
@@ -48,6 +51,7 @@ all:
 	@echo "cppcheck - analyze code with cppcheck"
 	@echo "doctest - compile example files and check their output"
 	@echo "fuzz_testing - prepare fuzz testing of the JSON parser"
+	@echo "fuzz_testing_bson - prepare fuzz testing of the BSON parser"
 	@echo "fuzz_testing_cbor - prepare fuzz testing of the CBOR parser"
 	@echo "fuzz_testing_msgpack - prepare fuzz testing of the MessagePack parser"
 	@echo "fuzz_testing_ubjson - prepare fuzz testing of the UBJSON parser"
@@ -116,9 +120,10 @@ doctest:
 # -Wno-range-loop-analysis: items tests "for(const auto i...)"
 # -Wno-float-equal: not all comparisons in the tests can be replaced by Approx
 # -Wno-switch-enum -Wno-covered-switch-default: pedantic/contradicting warnings about switches
+# -Wno-c++2a-compat: u8 literals will behave differently in C++20...
 # -Wno-padded: padding is nothing to warn about
 pedantic_clang:
-	$(MAKE) json_unit CXXFLAGS="\
+	$(MAKE) json_unit CXX=$(COMPILER_DIR)/clang++ CXXFLAGS="\
 		-std=c++11 -Wno-c++98-compat -Wno-c++98-compat-pedantic \
 		-Werror \
 		-Weverything \
@@ -130,11 +135,12 @@ pedantic_clang:
 		-Wno-range-loop-analysis \
 		-Wno-float-equal \
 		-Wno-switch-enum -Wno-covered-switch-default \
+		-Wno-c++2a-compat \
 		-Wno-padded"
 
 # calling GCC with most warnings
 pedantic_gcc:
-	$(MAKE) json_unit CXXFLAGS="\
+	$(MAKE) json_unit CXX=$(COMPILER_DIR)/g++ CXXFLAGS="\
 		-std=c++11 \
 		-Wno-deprecated-declarations \
 		-Werror \
@@ -220,6 +226,14 @@ fuzz_testing:
 	find test/data/json_tests -size -5k -name *json | xargs -I{} cp "{}" fuzz-testing/testcases
 	@echo "Execute: afl-fuzz -i fuzz-testing/testcases -o fuzz-testing/out fuzz-testing/fuzzer"
 
+fuzz_testing_bson:
+	rm -fr fuzz-testing
+	mkdir -p fuzz-testing fuzz-testing/testcases fuzz-testing/out
+	$(MAKE) parse_bson_fuzzer -C test CXX=afl-clang++
+	mv test/parse_bson_fuzzer fuzz-testing/fuzzer
+	find test/data -size -5k -name *.bson | xargs -I{} cp "{}" fuzz-testing/testcases
+	@echo "Execute: afl-fuzz -i fuzz-testing/testcases -o fuzz-testing/out fuzz-testing/fuzzer"
+
 fuzz_testing_cbor:
 	rm -fr fuzz-testing
 	mkdir -p fuzz-testing fuzz-testing/testcases fuzz-testing/out
@@ -270,8 +284,8 @@ cppcheck:
 clang_analyze:
 	rm -fr clang_analyze_build
 	mkdir clang_analyze_build
-	cd clang_analyze_build ; CCC_CXX=/Users/niels/Documents/projects/llvm-clang/local/bin/clang++ /Users/niels/Documents/projects/llvm-clang/local/bin/scan-build cmake ..
-	/Users/niels/Documents/projects/llvm-clang/local/bin/scan-build -enable-checker alpha.core.DynamicTypeChecker,alpha.core.PointerArithm,alpha.core.PointerSub,alpha.cplusplus.DeleteWithNonVirtualDtor,alpha.cplusplus.IteratorRange,alpha.cplusplus.MisusedMovedObject,alpha.security.ArrayBoundV2,alpha.core.Conversion --use-c++=/Users/niels/Documents/projects/llvm-clang/local/bin/clang++ --view -analyze-headers -o clang_analyze_build/report.html make -j10 -C clang_analyze_build
+	cd clang_analyze_build ; CCC_CXX=$(COMPILER_DIR)/clang++ CXX=$(COMPILER_DIR)/clang++ $(COMPILER_DIR)/scan-build cmake .. -GNinja
+	cd clang_analyze_build ; $(COMPILER_DIR)/scan-build -enable-checker alpha.core.BoolAssignment,alpha.core.CallAndMessageUnInitRefArg,alpha.core.CastSize,alpha.core.CastToStruct,alpha.core.Conversion,alpha.core.DynamicTypeChecker,alpha.core.FixedAddr,alpha.core.PointerArithm,alpha.core.PointerSub,alpha.core.SizeofPtr,alpha.core.StackAddressAsyncEscape,alpha.core.TestAfterDivZero,alpha.deadcode.UnreachableCode,core.builtin.BuiltinFunctions,core.builtin.NoReturnFunctions,core.CallAndMessage,core.DivideZero,core.DynamicTypePropagation,core.NonnilStringConstants,core.NonNullParamChecker,core.NullDereference,core.StackAddressEscape,core.UndefinedBinaryOperatorResult,core.uninitialized.ArraySubscript,core.uninitialized.Assign,core.uninitialized.Branch,core.uninitialized.CapturedBlockVariable,core.uninitialized.UndefReturn,core.VLASize,cplusplus.InnerPointer,cplusplus.Move,cplusplus.NewDelete,cplusplus.NewDeleteLeaks,cplusplus.SelfAssignment,deadcode.DeadStores,nullability.NullableDereferenced,nullability.NullablePassedToNonnull,nullability.NullableReturnedFromNonnull,nullability.NullPassedToNonnull,nullability.NullReturnedFromNonnull --use-c++=$(COMPILER_DIR)/clang++ --view -analyze-headers -o clang_analyze_build/report.html ninja
 
 ##########################################################################
 # maintainer targets
@@ -304,10 +318,11 @@ check-amalgamation:
 # check if every header in nlohmann includes sufficient headers to be compiled
 # individually
 check-single-includes:
-	for x in $(SRCS); do \
+	@for x in $(SRCS); do \
+	  echo "Checking self-sufficiency of $$x..." ; \
 	  echo "#include <$$x>\nint main() {}\n" | sed 's|include/||' > single_include_test.cpp; \
 	  $(CXX) $(CXXFLAGS) -Iinclude -std=c++11 single_include_test.cpp -o single_include_test; \
-	  rm single_include_test.cpp single_include_test; \
+	  rm -f single_include_test.cpp single_include_test; \
 	done
 
 ##########################################################################

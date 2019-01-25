@@ -1,7 +1,7 @@
 /*
     __ _____ _____ _____
  __|  |   __|     |   | |  JSON for Modern C++
-|  |  |__   |  |  | | | |  version 3.3.0
+|  |  |__   |  |  | | | |  version 3.5.0
 |_____|_____|_____|_|___|  https://github.com/nlohmann/json
 
 Licensed under the MIT License <http://opensource.org/licenses/MIT>.
@@ -31,7 +31,7 @@ SOFTWARE.
 #define NLOHMANN_JSON_HPP
 
 #define NLOHMANN_JSON_VERSION_MAJOR 3
-#define NLOHMANN_JSON_VERSION_MINOR 3
+#define NLOHMANN_JSON_VERSION_MINOR 5
 #define NLOHMANN_JSON_VERSION_PATCH 0
 
 #include <algorithm> // all_of, find, for_each
@@ -41,7 +41,7 @@ SOFTWARE.
 #include <functional> // hash, less
 #include <initializer_list> // initializer_list
 #include <iosfwd> // istream, ostream
-#include <iterator> // iterator_traits, random_access_iterator_tag
+#include <iterator> // random_access_iterator_tag
 #include <numeric> // accumulate
 #include <string> // string, stoi, to_string
 #include <utility> // declval, forward, move, pair, swap
@@ -208,6 +208,8 @@ class basic_json
     using json_pointer = ::nlohmann::json_pointer<basic_json>;
     template<typename T, typename SFINAE>
     using json_serializer = JSONSerializer<T, SFINAE>;
+    /// how to treat decoding errors
+    using error_handler_t = detail::error_handler_t;
     /// helper type for initializer lists of basic_json values
     using initializer_list_t = std::initializer_list<detail::json_ref<basic_json>>;
 
@@ -315,6 +317,7 @@ class basic_json
 
     @since 2.1.0
     */
+    JSON_NODISCARD
     static basic_json meta()
     {
         basic_json result;
@@ -947,7 +950,7 @@ class basic_json
                     object = nullptr;  // silence warning, see #821
                     if (JSON_UNLIKELY(t == value_t::null))
                     {
-                        JSON_THROW(other_error::create(500, "961c151d2e87f2686a955a9be24d316f1362bf21 3.3.0")); // LCOV_EXCL_LINE
+                        JSON_THROW(other_error::create(500, "961c151d2e87f2686a955a9be24d316f1362bf21 3.5.0")); // LCOV_EXCL_LINE
                     }
                     break;
                 }
@@ -1487,6 +1490,7 @@ class basic_json
 
     @since version 1.0.0
     */
+    JSON_NODISCARD
     static basic_json array(initializer_list_t init = {})
     {
         return basic_json(init, false, value_t::array);
@@ -1530,6 +1534,7 @@ class basic_json
 
     @since version 1.0.0
     */
+    JSON_NODISCARD
     static basic_json object(initializer_list_t init = {})
     {
         return basic_json(init, false, value_t::object);
@@ -1932,6 +1937,10 @@ class basic_json
     @param[in] ensure_ascii If @a ensure_ascii is true, all non-ASCII characters
     in the output are escaped with `\uXXXX` sequences, and the result consists
     of ASCII characters only.
+    @param[in] error_handler  how to react on decoding errors; there are three
+    possible values: `strict` (throws and exception in case a decoding error
+    occurs; default), `replace` (replace invalid UTF-8 sequences with U+FFFD),
+    and `ignore` (ignore invalid UTF-8 sequences during serialization).
 
     @return string containing the serialization of the JSON value
 
@@ -1950,13 +1959,16 @@ class basic_json
     @see https://docs.python.org/2/library/json.html#json.dump
 
     @since version 1.0.0; indentation character @a indent_char, option
-           @a ensure_ascii and exceptions added in version 3.0.0
+           @a ensure_ascii and exceptions added in version 3.0.0; error
+           handlers added in version 3.4.0.
     */
-    string_t dump(const int indent = -1, const char indent_char = ' ',
-                  const bool ensure_ascii = false) const
+    string_t dump(const int indent = -1,
+                  const char indent_char = ' ',
+                  const bool ensure_ascii = false,
+                  const error_handler_t error_handler = error_handler_t::strict) const
     {
         string_t result;
-        serializer s(detail::output_adapter<char, string_t>(result), indent_char);
+        serializer s(detail::output_adapter<char, string_t>(result), indent_char, error_handler);
 
         if (indent >= 0)
         {
@@ -3396,7 +3408,7 @@ class basic_json
 
     /*!
     @brief overload for a default value of type const char*
-    @copydoc basic_json::value(const typename object_t::key_type&, ValueType) const
+    @copydoc basic_json::value(const typename object_t::key_type&, const ValueType&) const
     */
     string_t value(const typename object_t::key_type& key, const char* default_value) const
     {
@@ -4331,9 +4343,20 @@ class basic_json
     Range-based for loop with `items()` function:
 
     @code{cpp}
-    for (auto it : j_object.items())
+    for (auto& el : j_object.items())
     {
-        std::cout << "key: " << it.key() << ", value:" << it.value() << '\n';
+        std::cout << "key: " << el.key() << ", value:" << el.value() << '\n';
+    }
+    @endcode
+
+    The `items()` function also allows to use
+    [structured bindings](https://en.cppreference.com/w/cpp/language/structured_binding)
+    (C++17):
+
+    @code{cpp}
+    for (auto& [key, val] : j_object.items())
+    {
+        std::cout << "key: " << key << ", value:" << val << '\n';
     }
     @endcode
 
@@ -4351,7 +4374,7 @@ class basic_json
 
     @complexity Constant.
 
-    @since version 3.1.0.
+    @since version 3.1.0, structured bindings support since 3.5.0.
     */
     iteration_proxy<iterator> items() noexcept
     {
@@ -6002,7 +6025,9 @@ class basic_json
     @param[in] allow_exceptions  whether to throw exceptions in case of a
     parse error (optional, true by default)
 
-    @return result of the deserialization
+    @return deserialized JSON value; in case of a parse error and
+            @a allow_exceptions set to `false`, the return value will be
+            value_t::discarded.
 
     @throw parse_error.101 if a parse error occurs; example: `""unexpected end
     of input; expected string literal""`
@@ -6029,6 +6054,7 @@ class basic_json
 
     @since version 2.0.3 (contiguous containers)
     */
+    JSON_NODISCARD
     static basic_json parse(detail::input_adapter&& i,
                             const parser_callback_t cb = nullptr,
                             const bool allow_exceptions = true)
@@ -6144,7 +6170,9 @@ class basic_json
     @param[in] allow_exceptions  whether to throw exceptions in case of a
     parse error (optional, true by default)
 
-    @return result of the deserialization
+    @return deserialized JSON value; in case of a parse error and
+            @a allow_exceptions set to `false`, the return value will be
+            value_t::discarded.
 
     @throw parse_error.101 in case of an unexpected token
     @throw parse_error.102 if to_unicode fails or surrogate error
@@ -6618,6 +6646,91 @@ class basic_json
         binary_writer<char>(o).write_ubjson(j, use_size, use_type);
     }
 
+
+    /*!
+    @brief Serializes the given JSON object `j` to BSON and returns a vector
+           containing the corresponding BSON-representation.
+
+    BSON (Binary JSON) is a binary format in which zero or more ordered key/value pairs are
+    stored as a single entity (a so-called document).
+
+    The library uses the following mapping from JSON values types to BSON types:
+
+    JSON value type | value/range                       | BSON type   | marker
+    --------------- | --------------------------------- | ----------- | ------
+    null            | `null`                            | null        | 0x0A
+    boolean         | `true`, `false`                   | boolean     | 0x08
+    number_integer  | -9223372036854775808..-2147483649 | int64       | 0x12
+    number_integer  | -2147483648..2147483647           | int32       | 0x10
+    number_integer  | 2147483648..9223372036854775807   | int64       | 0x12
+    number_unsigned | 0..2147483647                     | int32       | 0x10
+    number_unsigned | 2147483648..9223372036854775807   | int64       | 0x12
+    number_unsigned | 9223372036854775808..18446744073709551615| --   | --
+    number_float    | *any value*                       | double      | 0x01
+    string          | *any value*                       | string      | 0x02
+    array           | *any value*                       | document    | 0x04
+    object          | *any value*                       | document    | 0x03
+
+    @warning The mapping is **incomplete**, since only JSON-objects (and things
+    contained therein) can be serialized to BSON.
+    Also, integers larger than 9223372036854775807 cannot be serialized to BSON,
+    and the keys may not contain U+0000, since they are serialized a
+    zero-terminated c-strings.
+
+    @throw out_of_range.407  if `j.is_number_unsigned() && j.get<std::uint64_t>() > 9223372036854775807`
+    @throw out_of_range.409  if a key in `j` contains a NULL (U+0000)
+    @throw type_error.317    if `!j.is_object()`
+
+    @pre The input `j` is required to be an object: `j.is_object() == true`.
+
+    @note Any BSON output created via @ref to_bson can be successfully parsed
+          by @ref from_bson.
+
+    @param[in] j  JSON value to serialize
+    @return BSON serialization as byte vector
+
+    @complexity Linear in the size of the JSON value @a j.
+
+    @liveexample{The example shows the serialization of a JSON value to a byte
+    vector in BSON format.,to_bson}
+
+    @sa http://bsonspec.org/spec.html
+    @sa @ref from_bson(detail::input_adapter&&, const bool strict) for the
+        analogous deserialization
+    @sa @ref to_ubjson(const basic_json&, const bool, const bool) for the
+             related UBJSON format
+    @sa @ref to_cbor(const basic_json&) for the related CBOR format
+    @sa @ref to_msgpack(const basic_json&) for the related MessagePack format
+    */
+    static std::vector<uint8_t> to_bson(const basic_json& j)
+    {
+        std::vector<uint8_t> result;
+        to_bson(j, result);
+        return result;
+    }
+
+    /*!
+    @brief Serializes the given JSON object `j` to BSON and forwards the
+           corresponding BSON-representation to the given output_adapter `o`.
+    @param j The JSON object to convert to BSON.
+    @param o The output adapter that receives the binary BSON representation.
+    @pre The input `j` shall be an object: `j.is_object() == true`
+    @sa @ref to_bson(const basic_json&)
+    */
+    static void to_bson(const basic_json& j, detail::output_adapter<uint8_t> o)
+    {
+        binary_writer<uint8_t>(o).write_bson(j);
+    }
+
+    /*!
+    @copydoc to_bson(const basic_json&, detail::output_adapter<uint8_t>)
+    */
+    static void to_bson(const basic_json& j, detail::output_adapter<char> o)
+    {
+        binary_writer<char>(o).write_bson(j);
+    }
+
+
     /*!
     @brief create a JSON value from an input in CBOR format
 
@@ -6659,7 +6772,7 @@ class basic_json
     map                    | object          | 0xBF
     False                  | `false`         | 0xF4
     True                   | `true`          | 0xF5
-    Nill                   | `null`          | 0xF6
+    Null                   | `null`          | 0xF6
     Half-Precision Float   | number_float    | 0xF9
     Single-Precision Float | number_float    | 0xFA
     Double-Precision Float | number_float    | 0xFB
@@ -6690,7 +6803,9 @@ class basic_json
     @param[in] allow_exceptions  whether to throw exceptions in case of a
     parse error (optional, true by default)
 
-    @return deserialized JSON value
+    @return deserialized JSON value; in case of a parse error and
+            @a allow_exceptions set to `false`, the return value will be
+            value_t::discarded.
 
     @throw parse_error.110 if the given input ends prematurely or the end of
     file was not reached when @a strict was set to true
@@ -6715,6 +6830,7 @@ class basic_json
            @a strict parameter since 3.0.0; added @a allow_exceptions parameter
            since 3.2.0
     */
+    JSON_NODISCARD
     static basic_json from_cbor(detail::input_adapter&& i,
                                 const bool strict = true,
                                 const bool allow_exceptions = true)
@@ -6730,6 +6846,7 @@ class basic_json
     */
     template<typename A1, typename A2,
              detail::enable_if_t<std::is_constructible<detail::input_adapter, A1, A2>::value, int> = 0>
+    JSON_NODISCARD
     static basic_json from_cbor(A1 && a1, A2 && a2,
                                 const bool strict = true,
                                 const bool allow_exceptions = true)
@@ -6793,7 +6910,9 @@ class basic_json
     @param[in] allow_exceptions  whether to throw exceptions in case of a
     parse error (optional, true by default)
 
-    @return deserialized JSON value
+    @return deserialized JSON value; in case of a parse error and
+            @a allow_exceptions set to `false`, the return value will be
+            value_t::discarded.
 
     @throw parse_error.110 if the given input ends prematurely or the end of
     file was not reached when @a strict was set to true
@@ -6812,12 +6931,15 @@ class basic_json
         related CBOR format
     @sa @ref from_ubjson(detail::input_adapter&&, const bool, const bool) for
         the related UBJSON format
+    @sa @ref from_bson(detail::input_adapter&&, const bool, const bool) for
+        the related BSON format
 
     @since version 2.0.9; parameter @a start_index since 2.1.1; changed to
            consume input adapters, removed start_index parameter, and added
            @a strict parameter since 3.0.0; added @a allow_exceptions parameter
            since 3.2.0
     */
+    JSON_NODISCARD
     static basic_json from_msgpack(detail::input_adapter&& i,
                                    const bool strict = true,
                                    const bool allow_exceptions = true)
@@ -6833,6 +6955,7 @@ class basic_json
     */
     template<typename A1, typename A2,
              detail::enable_if_t<std::is_constructible<detail::input_adapter, A1, A2>::value, int> = 0>
+    JSON_NODISCARD
     static basic_json from_msgpack(A1 && a1, A2 && a2,
                                    const bool strict = true,
                                    const bool allow_exceptions = true)
@@ -6878,7 +7001,9 @@ class basic_json
     @param[in] allow_exceptions  whether to throw exceptions in case of a
     parse error (optional, true by default)
 
-    @return deserialized JSON value
+    @return deserialized JSON value; in case of a parse error and
+            @a allow_exceptions set to `false`, the return value will be
+            value_t::discarded.
 
     @throw parse_error.110 if the given input ends prematurely or the end of
     file was not reached when @a strict was set to true
@@ -6897,9 +7022,12 @@ class basic_json
         related CBOR format
     @sa @ref from_msgpack(detail::input_adapter&&, const bool, const bool) for
         the related MessagePack format
+    @sa @ref from_bson(detail::input_adapter&&, const bool, const bool) for
+        the related BSON format
 
     @since version 3.1.0; added @a allow_exceptions parameter since 3.2.0
     */
+    JSON_NODISCARD
     static basic_json from_ubjson(detail::input_adapter&& i,
                                   const bool strict = true,
                                   const bool allow_exceptions = true)
@@ -6915,6 +7043,7 @@ class basic_json
     */
     template<typename A1, typename A2,
              detail::enable_if_t<std::is_constructible<detail::input_adapter, A1, A2>::value, int> = 0>
+    JSON_NODISCARD
     static basic_json from_ubjson(A1 && a1, A2 && a2,
                                   const bool strict = true,
                                   const bool allow_exceptions = true)
@@ -6924,6 +7053,95 @@ class basic_json
         const bool res = binary_reader(detail::input_adapter(std::forward<A1>(a1), std::forward<A2>(a2))).sax_parse(input_format_t::ubjson, &sdp, strict);
         return res ? result : basic_json(value_t::discarded);
     }
+
+    /*!
+    @brief Create a JSON value from an input in BSON format
+
+    Deserializes a given input @a i to a JSON value using the BSON (Binary JSON)
+    serialization format.
+
+    The library maps BSON record types to JSON value types as follows:
+
+    BSON type       | BSON marker byte | JSON value type
+    --------------- | ---------------- | ---------------------------
+    double          | 0x01             | number_float
+    string          | 0x02             | string
+    document        | 0x03             | object
+    array           | 0x04             | array
+    binary          | 0x05             | still unsupported
+    undefined       | 0x06             | still unsupported
+    ObjectId        | 0x07             | still unsupported
+    boolean         | 0x08             | boolean
+    UTC Date-Time   | 0x09             | still unsupported
+    null            | 0x0A             | null
+    Regular Expr.   | 0x0B             | still unsupported
+    DB Pointer      | 0x0C             | still unsupported
+    JavaScript Code | 0x0D             | still unsupported
+    Symbol          | 0x0E             | still unsupported
+    JavaScript Code | 0x0F             | still unsupported
+    int32           | 0x10             | number_integer
+    Timestamp       | 0x11             | still unsupported
+    128-bit decimal float | 0x13       | still unsupported
+    Max Key         | 0x7F             | still unsupported
+    Min Key         | 0xFF             | still unsupported
+
+    @warning The mapping is **incomplete**. The unsupported mappings
+             are indicated in the table above.
+
+    @param[in] i  an input in BSON format convertible to an input adapter
+    @param[in] strict  whether to expect the input to be consumed until EOF
+                       (true by default)
+    @param[in] allow_exceptions  whether to throw exceptions in case of a
+    parse error (optional, true by default)
+
+    @return deserialized JSON value; in case of a parse error and
+            @a allow_exceptions set to `false`, the return value will be
+            value_t::discarded.
+
+    @throw parse_error.114 if an unsupported BSON record type is encountered
+
+    @complexity Linear in the size of the input @a i.
+
+    @liveexample{The example shows the deserialization of a byte vector in
+    BSON format to a JSON value.,from_bson}
+
+    @sa http://bsonspec.org/spec.html
+    @sa @ref to_bson(const basic_json&) for the analogous serialization
+    @sa @ref from_cbor(detail::input_adapter&&, const bool, const bool) for the
+        related CBOR format
+    @sa @ref from_msgpack(detail::input_adapter&&, const bool, const bool) for
+        the related MessagePack format
+    @sa @ref from_ubjson(detail::input_adapter&&, const bool, const bool) for the
+        related UBJSON format
+    */
+    JSON_NODISCARD
+    static basic_json from_bson(detail::input_adapter&& i,
+                                const bool strict = true,
+                                const bool allow_exceptions = true)
+    {
+        basic_json result;
+        detail::json_sax_dom_parser<basic_json> sdp(result, allow_exceptions);
+        const bool res = binary_reader(detail::input_adapter(i)).sax_parse(input_format_t::bson, &sdp, strict);
+        return res ? result : basic_json(value_t::discarded);
+    }
+
+    /*!
+    @copydoc from_bson(detail::input_adapter&&, const bool, const bool)
+    */
+    template<typename A1, typename A2,
+             detail::enable_if_t<std::is_constructible<detail::input_adapter, A1, A2>::value, int> = 0>
+    JSON_NODISCARD
+    static basic_json from_bson(A1 && a1, A2 && a2,
+                                const bool strict = true,
+                                const bool allow_exceptions = true)
+    {
+        basic_json result;
+        detail::json_sax_dom_parser<basic_json> sdp(result, allow_exceptions);
+        const bool res = binary_reader(detail::input_adapter(std::forward<A1>(a1), std::forward<A2>(a2))).sax_parse(input_format_t::bson, &sdp, strict);
+        return res ? result : basic_json(value_t::discarded);
+    }
+
+
 
     /// @}
 
@@ -7504,6 +7722,7 @@ class basic_json
 
     @since version 2.0.0
     */
+    JSON_NODISCARD
     static basic_json diff(const basic_json& source, const basic_json& target,
                            const std::string& path = "")
     {
@@ -7668,7 +7887,7 @@ class basic_json
     Thereby, `Target` is the current object; that is, the patch is applied to
     the current value.
 
-    @param[in] patch  the patch to apply
+    @param[in] apply_patch  the patch to apply
 
     @complexity Linear in the lengths of @a patch.
 
@@ -7680,15 +7899,15 @@ class basic_json
 
     @since version 3.0.0
     */
-    void merge_patch(const basic_json& patch)
+    void merge_patch(const basic_json& apply_patch)
     {
-        if (patch.is_object())
+        if (apply_patch.is_object())
         {
             if (not is_object())
             {
                 *this = object();
             }
-            for (auto it = patch.begin(); it != patch.end(); ++it)
+            for (auto it = apply_patch.begin(); it != apply_patch.end(); ++it)
             {
                 if (it.value().is_null())
                 {
@@ -7702,7 +7921,7 @@ class basic_json
         }
         else
         {
-            *this = patch;
+            *this = apply_patch;
         }
     }
 

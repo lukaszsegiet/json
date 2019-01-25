@@ -1,7 +1,7 @@
 /*
     __ _____ _____ _____
  __|  |   __|     |   | |  JSON for Modern C++ (test suite)
-|  |  |__   |  |  | | | |  version 3.3.0
+|  |  |__   |  |  | | | |  version 3.5.0
 |_____|_____|_____|_|___|  https://github.com/nlohmann/json
 
 Licensed under the MIT License <http://opensource.org/licenses/MIT>.
@@ -305,7 +305,7 @@ TEST_CASE("README", "[hide]")
             // }
 
             // calculate a JSON patch from two JSON values
-            json::diff(j_result, j_original);
+            auto res = json::diff(j_result, j_original);
             // [
             //   { "op":" replace", "path": "/baz", "value": ["one", "two", "three"] },
             //   { "op":"remove","path":"/hello" },

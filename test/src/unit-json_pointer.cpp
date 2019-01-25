@@ -1,7 +1,7 @@
 /*
     __ _____ _____ _____
  __|  |   __|     |   | |  JSON for Modern C++ (test suite)
-|  |  |__   |  |  | | | |  version 3.3.0
+|  |  |__   |  |  | | | |  version 3.5.0
 |_____|_____|_____|_|___|  https://github.com/nlohmann/json
 
 Licensed under the MIT License <http://opensource.org/licenses/MIT>.
@@ -458,5 +458,59 @@ TEST_CASE("JSON pointers")
             j["/a12"_json_pointer] = 0;
             CHECK(j.is_object());
         }
+    }
+
+    SECTION("push and pop")
+    {
+        const json j =
+        {
+            {"", "Hello"},
+            {"pi", 3.141},
+            {"happy", true},
+            {"name", "Niels"},
+            {"nothing", nullptr},
+            {
+                "answer", {
+                    {"everything", 42}
+                }
+            },
+            {"list", {1, 0, 2}},
+            {
+                "object", {
+                    {"currency", "USD"},
+                    {"value", 42.99},
+                    {"", "empty string"},
+                    {"/", "slash"},
+                    {"~", "tilde"},
+                    {"~1", "tilde1"}
+                }
+            }
+        };
+
+        // empty json_pointer returns the root JSON-object
+        auto ptr = ""_json_pointer;
+        CHECK(j[ptr] == j);
+
+        // simple field access
+        ptr.push_back("pi");
+        CHECK(j[ptr] == j["pi"]);
+
+        ptr.pop_back();
+        CHECK(j[ptr] == j);
+
+        // object and children access
+        ptr.push_back("answer");
+        ptr.push_back("everything");
+        CHECK(j[ptr] == j["answer"]["everything"]);
+
+        ptr.pop_back();
+        ptr.pop_back();
+        CHECK(j[ptr] == j);
+
+        // push key which has to be encoded
+        ptr.push_back("object");
+        ptr.push_back("/");
+        CHECK(j[ptr] == j["object"]["/"]);
+        CHECK(ptr.to_string() == "/object/~1");
     }
 }

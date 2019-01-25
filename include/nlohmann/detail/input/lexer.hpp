@@ -1262,7 +1262,7 @@ scan_number_done:
         if (current == '\n')
         {
             ++position.lines_read;
-            ++position.chars_read_current_line = 0;
+            position.chars_read_current_line = 0;
         }
 
         return current;
@@ -1360,7 +1360,7 @@ scan_number_done:
             {
                 // escape control characters
                 char cs[9];
-                snprintf(cs, 9, "<U+%.4X>", static_cast<unsigned char>(c));
+                (std::snprintf)(cs, 9, "<U+%.4X>", static_cast<unsigned char>(c));
                 result += cs;
             }
             else
